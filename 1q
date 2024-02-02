@@ -1,0 +1,87 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"log"
+	"os"
+
+	"github.com/nbd-wtf/go-nostr"
+)
+
+type Pipeline struct {
+	relays []*nostr.Relay
+	Reader EventBuffer
+	Output io.Writer
+	Error  error
+}
+
+func New() *Pipeline {
+
+	pipeline := &Pipeline{
+		Output: os.Stdout,
+	}
+
+	ctx := context.Background()
+
+	for _, relay := range []string{"wss://nostr-01.yakihonne.com", "wss://relay.damus.io/"} {
+
+		r, err := nostr.RelayConnect(ctx, relay)
+		if err != nil {
+			panic(err)
+		}
+
+		pipeline.relays = append(pipeline.relays, r)
+	}
+
+	return pipeline
+}
+
+func (s *Pipeline) Authors(npubs []string) *Pipeline {
+
+	e := &nostr.Event{
+		ID:     "dc90c95f09947507c1044e8f48bcf6350aa6bff1507dd4acfc755b9239b5c962",
+		PubKey: "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+	}
+
+	eb := EventBuffer{
+		events: []*nostr.Event{
+			e,
+		},
+	}
+
+	return &Pipeline{
+		Reader: eb,
+	}
+}
+
+func (s *Pipeline) Stdout() {
+	if s.Error != nil {
+		return
+	}
+	io.Copy(s.Output, s.Reader)
+}
+
+func (p *Pipeline) String() (string, error) {
+	if p.Error != nil {
+		return "", p.Error
+	}
+    log.Println("data")
+	data, err := io.ReadAll(p.Reader)
+    log.Println(data)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func main() {
+	log.Println("Hello")
+
+	p := New()
+
+    s, _ := p.Authors([]string{"npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"}).String()
+
+    fmt.Println(s)
+}
