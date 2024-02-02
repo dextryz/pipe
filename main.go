@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -59,7 +60,7 @@ func (s *Pipeline) Author(npub string) *Pipeline {
 		panic(err)
 	}
 	s.Reader.filter.Authors = []string{pk.(string)}
-	s.Reader.filter.Limit = 1
+	s.Reader.filter.Limit = 1000
 	return s
 }
 
@@ -139,6 +140,28 @@ func (s *Pipeline) Query() *Pipeline {
 	return s
 }
 
+func (s *Pipeline) Tags() {
+
+	tags := make(map[string]int)
+
+	for _, e := range s.Reader.events {
+		for _, t := range e.Tags {
+			if t.Key() == "t" {
+				_, ok := tags[t.Value()]
+				if ok {
+					tags[t.Value()] += 1
+				} else {
+					tags[t.Value()] = 1
+				}
+			}
+		}
+	}
+
+	for tag, count := range tags {
+		fmt.Printf("%s (%d)\n", tag, count)
+	}
+}
+
 func (s *Pipeline) Stdout() {
 	if s.Error != nil {
 		return
@@ -158,11 +181,14 @@ func (p *Pipeline) String() (string, error) {
 }
 
 func main() {
-	log.Println("Hello")
 
 	p := New()
 
 	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
+
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
-	p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
+	//p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
+
+	//p.Author(npub).Query().Tags().Stdout()
+	p.Author(npub).Kind(nostr.KindArticle).Query().Tags()
 }
