@@ -34,11 +34,11 @@ type Pipeline struct {
 	Error  error
 }
 
-func New() *Pipeline {
+func New(relay string) *Pipeline {
 
 	ctx := context.Background()
 
-	r, err := nostr.RelayConnect(ctx, "wss://relay.damus.io/")
+	r, err := nostr.RelayConnect(ctx, relay)
 	if err != nil {
 		panic(err)
 	}
@@ -181,14 +181,13 @@ func (p *Pipeline) String() (string, error) {
 }
 
 func main() {
-
-	p := New()
-
 	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
+
+	pipeline := New("wss://relay.damus.io/")
+	pipeline.Author(npub).Kind(nostr.KindArticle).Query().Tags()
 
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
 
 	//p.Author(npub).Query().Tags().Stdout()
-	p.Author(npub).Kind(nostr.KindArticle).Query().Tags()
 }
