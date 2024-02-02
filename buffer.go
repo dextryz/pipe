@@ -8,6 +8,7 @@ import (
 
 type EventBuffer struct {
 	events     []*nostr.Event
+	filter     *nostr.Filter
 	serialized []byte
 	readPos    int // Track the current position in the serialized slice.
 }

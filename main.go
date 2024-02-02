@@ -30,16 +30,28 @@ func New() *Pipeline {
 		panic(err)
 	}
 
+	eb := &EventBuffer{
+		filter: &nostr.Filter{},
+	}
+
 	return &Pipeline{
 		Relay:  r,
 		Output: os.Stdout,
+		Reader: eb,
 	}
 }
 
+func (s *Pipeline) Author(npub string) *Pipeline {
+	_, pk, err := nip19.Decode(npub)
+	if err != nil {
+		panic(err)
+	}
+	s.Reader.filter.Authors = []string{pk.(string)}
+	s.Reader.filter.Limit = 1
+	return s
+}
+
 func (s *Pipeline) Authors(npubs []string) *Pipeline {
-
-	ctx := context.Background()
-
 	pk := []string{}
 	for _, npub := range npubs {
 		_, v, err := nip19.Decode(npub)
@@ -48,28 +60,35 @@ func (s *Pipeline) Authors(npubs []string) *Pipeline {
 		}
 		pk = append(pk, v.(string))
 	}
+	s.Reader.filter.Authors = pk
+	s.Reader.filter.Limit = 1
+	return s
+}
 
-	filter := nostr.Filter{
-		Kinds:   []int{nostr.KindArticle},
-		Authors: pk,
-		Limit:   1,
-	}
+func (s *Pipeline) Kind(kind int) *Pipeline {
+	s.Reader.filter.Kinds = []int{kind}
+	return s
+}
 
-	events, err := s.Relay.QuerySync(ctx, filter)
+func (s *Pipeline) Kinds(kinds []int) *Pipeline {
+	s.Reader.filter.Kinds = kinds
+	return s
+}
+
+func (s *Pipeline) Query() *Pipeline {
+
+	ctx := context.Background()
+
+	events, err := s.Relay.QuerySync(ctx, *s.Reader.filter)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
-	eb := EventBuffer{
-		events: events,
-	}
+	s.Reader.events = events
 
-	eb.SerializeEvents(eb.events)
+	s.Reader.SerializeEvents(s.Reader.events)
 
-	return &Pipeline{
-        Output: s.Output,
-		Reader: &eb,
-	}
+	return s
 }
 
 func (s *Pipeline) Stdout() {
@@ -95,5 +114,6 @@ func main() {
 
 	p := New()
 
-	p.Authors([]string{"npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"}).Stdout()
+	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
+	p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
 }
