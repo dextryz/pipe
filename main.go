@@ -14,6 +14,18 @@ import (
 // We have to look at the Pool impl in go-nostr.
 // The problem is pulling the same event from multiple relays.
 
+func StringEnv(key string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		log.Fatalf("address env variable \"%s\" not set, usual", key)
+	}
+	return value
+}
+
+var (
+	PRIVATE_KEY = StringEnv("PRIVATE_KEY")
+)
+
 type Pipeline struct {
 	Relay  *nostr.Relay
 	Reader *EventBuffer
@@ -75,6 +87,42 @@ func (s *Pipeline) Kinds(kinds []int) *Pipeline {
 	return s
 }
 
+func (s *Pipeline) Publish(relay string) {
+
+	ctx := context.Background()
+
+	r, err := nostr.RelayConnect(ctx, relay)
+	if err != nil {
+		panic(err)
+	}
+
+	// There has to be events cached in the buffer.
+	// It makes no sense to publish an empty buffer no then does it?
+	// Impl proper cheks and balances
+	for _, e := range s.Reader.events {
+
+		event := &nostr.Event{
+			Kind:      e.Kind,
+			Content:   e.Content,
+			CreatedAt: nostr.Now(),
+		}
+
+		_, sk, err := nip19.Decode(PRIVATE_KEY)
+		if err != nil {
+			panic(err)
+		}
+
+		event.Sign(sk.(string))
+
+		err = r.Publish(ctx, *event)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		log.Println("Published")
+	}
+}
+
 func (s *Pipeline) Query() *Pipeline {
 
 	ctx := context.Background()
@@ -115,5 +163,6 @@ func main() {
 	p := New()
 
 	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
-	p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
+	//p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
+	p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
 }
