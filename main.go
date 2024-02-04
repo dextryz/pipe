@@ -9,10 +9,16 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
 )
+
+type kv struct {
+	Key   string
+	Value int
+}
 
 type Events struct {
 	EventList []*nostr.Event `json:"events"`
@@ -120,7 +126,7 @@ func (s *Pipeline) Query() *Pipeline {
 	serialized = append(serialized, ']')
 	serialized = append(serialized, '}')
 
-	var b bytes.Buffer // A Buffer needs no initialization.
+	var b bytes.Buffer
 	b.Write(serialized)
 
 	return &Pipeline{
@@ -159,11 +165,104 @@ func (s *Pipeline) Tags() *Pipeline {
 		}
 	}
 
-	for tag, count := range tags {
-		fmt.Printf("%s (%d)\n", tag, count)
+	data, err := json.Marshal(tags)
+	if err != nil {
+		log.Fatalf("Error marshaling map to JSON: %v", err)
 	}
 
-	return &Pipeline{}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) SortByCount() *Pipeline {
+
+	tags := make(map[string]int)
+
+	input := bufio.NewScanner(s.Reader)
+
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &tags)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	// Convert map to slice of kv structs.
+	var ss []kv
+	for k, v := range tags {
+		ss = append(ss, kv{k, v})
+	}
+
+	// Sort slice by Value.
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Value < ss[j].Value // For descending order, use ss[i].Value > ss[j].Value
+	})
+
+	// Optionally, serialize the sorted map to JSON and print.
+	data, err := json.Marshal(ss)
+	if err != nil {
+		log.Fatalf("Error marshaling sorted map to JSON: %v", err)
+	}
+
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) SortByName() *Pipeline {
+
+	tags := make(map[string]int)
+
+	input := bufio.NewScanner(s.Reader)
+
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &tags)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	// Extract keys.
+	var keys []string
+	for k := range tags {
+		keys = append(keys, k)
+	}
+
+	// Sort keys.
+	sort.Strings(keys)
+
+	// Iterate over sorted keys and build a sorted map.
+	sortedMap := make(map[string]int)
+	for _, k := range keys {
+		sortedMap[k] = tags[k]
+		fmt.Printf("%s: %d\n", k, tags[k]) // Print each key-value pair.
+	}
+
+	// Optionally, serialize the sorted map to JSON and print.
+	data, err := json.Marshal(sortedMap)
+	if err != nil {
+		log.Fatalf("Error marshaling sorted map to JSON: %v", err)
+	}
+
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
 }
 
 func (s *Pipeline) Stdout() {
@@ -189,7 +288,7 @@ func main() {
 	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
 
 	pipeline := New("wss://relay.damus.io/")
-	pipeline.Author(npub).Query().Tags()
+	pipeline.Author(npub).Query().Tags().SortByCount().Stdout()
 
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
