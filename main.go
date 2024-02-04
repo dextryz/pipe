@@ -1,4 +1,4 @@
-package main
+package nostrpipeline
 
 import (
 	"bufio"
@@ -22,14 +22,10 @@ import (
 func StringEnv(key string) string {
 	value, ok := os.LookupEnv(key)
 	if !ok {
-		log.Fatalf("address env variable \"%s\" not set, usual", key)
+		log.Fatalf("env variable \"%s\" not set, usual", key)
 	}
 	return value
 }
-
-var (
-	PRIVATE_KEY = StringEnv("PRIVATE_KEY")
-)
 
 type kv struct {
 	Key   string
@@ -170,6 +166,69 @@ func (s *Pipeline) Query() *Pipeline {
 		Reader: &b,
 		Output: s.Output,
 	}
+}
+
+func (s *Pipeline) Titles() (titles []string) {
+
+	var events Events
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &events)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	for _, e := range events.EventList {
+		for _, t := range e.Tags {
+			if t.Key() == "title" {
+				titles = append(titles, t.Value())
+			}
+		}
+	}
+
+    return titles
+}
+
+func (s *Pipeline) Ids(relay, npub string) (ids []string) {
+
+	var events Events
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &events)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	for _, e := range events.EventList {
+        //nid, err := nip19.EncodeNote(e.ID)
+
+        title := ""
+		for _, t := range e.Tags {
+			if t.Key() == "title" {
+                title = t.Value()
+			}
+		}
+
+		_, pk, err := nip19.Decode(npub)
+		if err != nil {
+			panic(err)
+		}
+
+        naddr, err := nip19.EncodeEntity(
+            pk.(string),
+            nostr.KindArticle,
+            title,
+            []string{},
+        )
+        if err != nil {
+            log.Fatalln(err)
+        }
+		ids = append(ids, naddr)
+	}
+
+    return ids
 }
 
 func (s *Pipeline) Tags() *Pipeline {
@@ -320,7 +379,8 @@ func (s *Pipeline) Publish(relay string) {
 			CreatedAt: nostr.Now(),
 		}
 
-		_, sk, err := nip19.Decode(PRIVATE_KEY)
+		private_key := StringEnv("PRIVATE_KEY")
+		_, sk, err := nip19.Decode(private_key)
 		if err != nil {
 			panic(err)
 		}
