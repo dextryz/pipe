@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"os"
+	"sort"
 
 	"github.com/nbd-wtf/go-nostr"
 	"github.com/nbd-wtf/go-nostr/nip19"
@@ -27,9 +31,37 @@ var (
 	PRIVATE_KEY = StringEnv("PRIVATE_KEY")
 )
 
+type kv struct {
+	Key   string
+	Value int
+}
+
+type Events struct {
+	EventList []*nostr.Event `json:"events"`
+}
+
+func (s *Events) Serialize() []byte {
+	b := []byte("{\"events\":[")
+	for i, evt := range s.EventList {
+		if i > 0 {
+			b = append(b, ',')
+		}
+
+		be, err := json.Marshal(evt)
+		if err != nil {
+			log.Fatalln(err)
+		}
+
+		b = append(b, be...)
+	}
+	b = append(b, ']')
+	b = append(b, '}')
+    return b
+}
+
 type Pipeline struct {
 	Relay  *nostr.Relay
-	Reader *EventBuffer
+	Reader io.Reader
 	Output io.Writer
 	Error  error
 }
@@ -43,49 +75,220 @@ func New(relay string) *Pipeline {
 		panic(err)
 	}
 
-	eb := &EventBuffer{
-		filter: &nostr.Filter{},
-	}
-
 	return &Pipeline{
 		Relay:  r,
 		Output: os.Stdout,
-		Reader: eb,
 	}
-}
-
-func (s *Pipeline) Author(npub string) *Pipeline {
-	_, pk, err := nip19.Decode(npub)
-	if err != nil {
-		panic(err)
-	}
-	s.Reader.filter.Authors = []string{pk.(string)}
-	s.Reader.filter.Limit = 1000
-	return s
-}
-
-func (s *Pipeline) Authors(npubs []string) *Pipeline {
-	pk := []string{}
-	for _, npub := range npubs {
-		_, v, err := nip19.Decode(npub)
-		if err != nil {
-			panic(err)
-		}
-		pk = append(pk, v.(string))
-	}
-	s.Reader.filter.Authors = pk
-	s.Reader.filter.Limit = 1
-	return s
-}
-
-func (s *Pipeline) Kind(kind int) *Pipeline {
-	s.Reader.filter.Kinds = []int{kind}
-	return s
 }
 
 func (s *Pipeline) Kinds(kinds []int) *Pipeline {
-	s.Reader.filter.Kinds = kinds
-	return s
+
+	var filter nostr.Filter
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &filter)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	filter.Kinds = kinds
+
+	data, err := json.Marshal(filter)
+	if err != nil {
+		fmt.Println("error serializing filter:", err)
+		return nil
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) Authors(npubs []string) *Pipeline {
+
+    var authors []string
+
+    for _, npub := range npubs {
+        _, pk, err := nip19.Decode(npub)
+        if err != nil {
+            panic(err)
+        }
+        authors = append(authors, pk.(string))
+    }
+
+	f := nostr.Filter{
+		Kinds:   []int{nostr.KindTextNote},
+		Authors: authors,
+		Limit:   100,
+	}
+
+	data, err := json.Marshal(f)
+	if err != nil {
+		fmt.Println("error serializing filter:", err)
+		return nil
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) Query() *Pipeline {
+
+	var filter nostr.Filter
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &filter)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	ctx := context.Background()
+	events, err := s.Relay.QuerySync(ctx, filter)
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+    el := Events{
+        EventList: events,
+    }
+	var b bytes.Buffer
+	b.Write(el.Serialize())
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) Tags() *Pipeline {
+
+	var events Events
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &events)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+
+	}
+
+	tags := make(map[string]int)
+	for _, e := range events.EventList {
+		for _, t := range e.Tags {
+			if t.Key() == "t" {
+				_, ok := tags[t.Value()]
+				if ok {
+					tags[t.Value()] += 1
+				} else {
+					tags[t.Value()] = 1
+				}
+			}
+		}
+	}
+
+	data, err := json.Marshal(tags)
+	if err != nil {
+		log.Fatalf("Error marshaling map to JSON: %v", err)
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) SortByCount() *Pipeline {
+
+	tags := make(map[string]int)
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &tags)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	// Convert map to slice of kv structs.
+	var ss []kv
+	for k, v := range tags {
+		ss = append(ss, kv{k, v})
+	}
+
+	// Sort slice by Value.
+	sort.Slice(ss, func(i, j int) bool {
+		return ss[i].Value < ss[j].Value // For descending order, use ss[i].Value > ss[j].Value
+	})
+
+	// Optionally, serialize the sorted map to JSON and print.
+	data, err := json.Marshal(ss)
+	if err != nil {
+		log.Fatalf("Error marshaling sorted map to JSON: %v", err)
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
+func (s *Pipeline) SortByName() *Pipeline {
+
+	tags := make(map[string]int)
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &tags)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
+	// Extract keys.
+	var keys []string
+	for k := range tags {
+		keys = append(keys, k)
+	}
+
+	// Sort keys.
+	sort.Strings(keys)
+
+	// Iterate over sorted keys and build a sorted map.
+	sortedMap := make(map[string]int)
+	for _, k := range keys {
+		sortedMap[k] = tags[k]
+		fmt.Printf("%s: %d\n", k, tags[k]) // Print each key-value pair.
+	}
+
+	// Optionally, serialize the sorted map to JSON and print.
+	data, err := json.Marshal(sortedMap)
+	if err != nil {
+		log.Fatalf("Error marshaling sorted map to JSON: %v", err)
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
 }
 
 func (s *Pipeline) Publish(relay string) {
@@ -97,14 +300,23 @@ func (s *Pipeline) Publish(relay string) {
 		panic(err)
 	}
 
+	events := Events{}
+	input := bufio.NewScanner(s.Reader)
+	for input.Scan() {
+		err := json.Unmarshal(input.Bytes(), &events)
+		if err != nil {
+			fmt.Println("Error decoding JSON:", err)
+		}
+	}
+
 	// There has to be events cached in the buffer.
 	// It makes no sense to publish an empty buffer no then does it?
 	// Impl proper cheks and balances
-	for _, e := range s.Reader.events {
+	for _, e := range events.EventList {
 
 		event := &nostr.Event{
 			Kind:      e.Kind,
-			Content:   e.Content,
+			Content:   e.Content + "AFTER PIPELINE",
 			CreatedAt: nostr.Now(),
 		}
 
@@ -121,44 +333,6 @@ func (s *Pipeline) Publish(relay string) {
 		}
 
 		log.Println("Published")
-	}
-}
-
-func (s *Pipeline) Query() *Pipeline {
-
-	ctx := context.Background()
-
-	events, err := s.Relay.QuerySync(ctx, *s.Reader.filter)
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	s.Reader.events = events
-
-	s.Reader.SerializeEvents(s.Reader.events)
-
-	return s
-}
-
-func (s *Pipeline) Tags() {
-
-	tags := make(map[string]int)
-
-	for _, e := range s.Reader.events {
-		for _, t := range e.Tags {
-			if t.Key() == "t" {
-				_, ok := tags[t.Value()]
-				if ok {
-					tags[t.Value()] += 1
-				} else {
-					tags[t.Value()] = 1
-				}
-			}
-		}
-	}
-
-	for tag, count := range tags {
-		fmt.Printf("%s (%d)\n", tag, count)
 	}
 }
 
@@ -181,10 +355,12 @@ func (p *Pipeline) String() (string, error) {
 }
 
 func main() {
+
 	npub := "npub14ge829c4pvgx24c35qts3sv82wc2xwcmgng93tzp6d52k9de2xgqq0y4jk"
 
 	pipeline := New("wss://relay.damus.io/")
-	pipeline.Author(npub).Kind(nostr.KindArticle).Query().Tags()
+	pipeline.Authors([]string{npub}).Kinds([]int{nostr.KindArticle}).Query().Tags().SortByCount().Stdout()
+	//pipeline.Authors([]string{npub}).Query().Publish("wss://relay.damus.io/")
 
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Stdout()
 	//p.Author(npub).Kind(nostr.KindTextNote).Query().Publish("wss://relay.damus.io/")
