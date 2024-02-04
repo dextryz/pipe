@@ -1,4 +1,4 @@
-module github.com/dextryz/atreides
+module github.com/dextryz/nostr-pipelines
 
 go 1.21.0
 

@@ -56,7 +56,7 @@ func (s *Events) Serialize() []byte {
 	}
 	b = append(b, ']')
 	b = append(b, '}')
-    return b
+	return b
 }
 
 type Pipeline struct {
@@ -111,15 +111,15 @@ func (s *Pipeline) Kinds(kinds []int) *Pipeline {
 
 func (s *Pipeline) Authors(npubs []string) *Pipeline {
 
-    var authors []string
+	var authors []string
 
-    for _, npub := range npubs {
-        _, pk, err := nip19.Decode(npub)
-        if err != nil {
-            panic(err)
-        }
-        authors = append(authors, pk.(string))
-    }
+	for _, npub := range npubs {
+		_, pk, err := nip19.Decode(npub)
+		if err != nil {
+			panic(err)
+		}
+		authors = append(authors, pk.(string))
+	}
 
 	f := nostr.Filter{
 		Kinds:   []int{nostr.KindTextNote},
@@ -159,9 +159,9 @@ func (s *Pipeline) Query() *Pipeline {
 		log.Fatalln(err)
 	}
 
-    el := Events{
-        EventList: events,
-    }
+	el := Events{
+		EventList: events,
+	}
 	var b bytes.Buffer
 	b.Write(el.Serialize())
 
@@ -316,7 +316,7 @@ func (s *Pipeline) Publish(relay string) {
 
 		event := &nostr.Event{
 			Kind:      e.Kind,
-			Content:   e.Content + "AFTER PIPELINE",
+			Content:   e.Content,
 			CreatedAt: nostr.Now(),
 		}
 
