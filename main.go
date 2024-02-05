@@ -77,6 +77,23 @@ func New(relay string) *Pipeline {
 	}
 }
 
+func (s *Pipeline) Filter(filter nostr.Filter) *Pipeline {
+
+	data, err := json.Marshal(filter)
+	if err != nil {
+		fmt.Println("error serializing filter:", err)
+		return nil
+	}
+	var b bytes.Buffer
+	b.Write(data)
+
+	return &Pipeline{
+		Relay:  s.Relay,
+		Reader: &b,
+		Output: s.Output,
+	}
+}
+
 func (s *Pipeline) Kinds(kinds []int) *Pipeline {
 
 	var filter nostr.Filter
@@ -187,10 +204,10 @@ func (s *Pipeline) Titles() (titles []string) {
 		}
 	}
 
-    return titles
+	return titles
 }
 
-func (s *Pipeline) Ids(relay, npub string) (ids []string) {
+func (s *Pipeline) Ids() (ids []string) {
 
 	var events Events
 	input := bufio.NewScanner(s.Reader)
@@ -202,33 +219,27 @@ func (s *Pipeline) Ids(relay, npub string) (ids []string) {
 	}
 
 	for _, e := range events.EventList {
-        //nid, err := nip19.EncodeNote(e.ID)
 
-        title := ""
+		title := ""
 		for _, t := range e.Tags {
 			if t.Key() == "title" {
-                title = t.Value()
+				title = t.Value()
 			}
 		}
 
-		_, pk, err := nip19.Decode(npub)
+		naddr, err := nip19.EncodeEntity(
+			e.PubKey,
+			nostr.KindArticle,
+			title,
+			[]string{},
+		)
 		if err != nil {
-			panic(err)
+			log.Fatalln(err)
 		}
-
-        naddr, err := nip19.EncodeEntity(
-            pk.(string),
-            nostr.KindArticle,
-            title,
-            []string{},
-        )
-        if err != nil {
-            log.Fatalln(err)
-        }
 		ids = append(ids, naddr)
 	}
 
-    return ids
+	return ids
 }
 
 func (s *Pipeline) Tags() *Pipeline {
