@@ -207,7 +207,7 @@ func (s *Pipeline) Titles() (titles []string) {
 	return titles
 }
 
-func (s *Pipeline) Ids() (ids []string) {
+func (s *Pipeline) Naddrs() (ids []string) {
 
 	var events Events
 	input := bufio.NewScanner(s.Reader)
@@ -251,7 +251,6 @@ func (s *Pipeline) Tags() *Pipeline {
 		if err != nil {
 			fmt.Println("Error decoding JSON:", err)
 		}
-
 	}
 
 	tags := make(map[string]int)
